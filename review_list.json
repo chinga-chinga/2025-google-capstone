@@ -1,0 +1,19 @@
+[
+  {
+    "to": "db:admin",
+    "port": 5432,
+    "reason": "Direct access to prod admin DB. REQUIRES CISO REVIEW."
+  },
+  {
+    "from": "app:public-ingress",
+    "to": "db:*",
+    "port": "*",
+    "reason": "Public services should never talk directly to a database. REQUIRES SECENG REVIEW."
+  },
+  {
+    "from": "*",
+    "to": "*",
+    "port": 22,
+    "reason": "All SSH access. REQUIRES NETENG REVIEW."
+  }
+]
