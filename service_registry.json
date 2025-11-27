@@ -1,0 +1,22 @@
+{
+  "checkout-service": {
+    "type": "gke_workload",
+    "tag": "app:checkout",
+    "ip": "10.0.1.5"
+  },
+  "billing-db": {
+    "type": "cloud_sql",
+    "tag": "db:billing",
+    "ip": "10.0.2.99"
+  },
+  "public-internet": {
+    "type": "external",
+    "tag": "app:public-ingress",
+    "ip": "0.0.0.0/0"
+  },
+  "admin-db": {
+    "type": "cloud_sql",
+    "tag": "db:admin",
+    "ip": "10.0.99.99"
+  }
+}
