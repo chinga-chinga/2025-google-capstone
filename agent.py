@@ -1,19 +1,25 @@
 import json
 import logging
+import warnings
 from google.adk.agents import LlmAgent
 from google.adk.apps.app import App, ResumabilityConfig
 from google.adk.models.google_llm import Gemini
 from google.adk.tools.tool_context import ToolContext
 from google.adk.tools.agent_tool import AgentTool
+from google.adk.plugins.logging_plugin import LoggingPlugin
 
-# Set up logging
+# --- SILENCE THE NOISE ---
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("google.adk").setLevel(logging.ERROR)
+logging.getLogger("google_adk").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=UserWarning, module="google.adk")
 
 POLICY_FILE = "review_list.json"
 REGISTRY_FILE = "service_registry.json"
 
-# --- 1. THE GCP QUERY AGENT (The Eyes) ---
+
+
+# --- 2. THE GCP QUERY AGENT (The Eyes) ---
 def lookup_resource_tag(friendly_name: str) -> str:
     """
     Translates a friendly name (e.g., 'checkout-service') into a network tag (e.g., 'app:checkout').
@@ -24,7 +30,6 @@ def lookup_resource_tag(friendly_name: str) -> str:
         with open(REGISTRY_FILE, 'r') as f:
             registry = json.load(f)
         
-        # Simple fuzzy match
         for key, data in registry.items():
             if friendly_name.lower() in key.lower():
                 return data['tag']
@@ -33,7 +38,7 @@ def lookup_resource_tag(friendly_name: str) -> str:
         return "ERROR: Registry file not found."
 
 gcp_query_agent = LlmAgent(
-    model=Gemini(model="gemini-2.5-flash"),
+    model=Gemini(model="gemini-2.0-flash"), # <--- UPDATED MODEL
     name="GcpQueryAgent",
     instruction="""
     You are the Cloud Infrastructure Map. 
@@ -44,7 +49,7 @@ gcp_query_agent = LlmAgent(
     tools=[lookup_resource_tag]
 )
 
-# --- 2. THE POLICY AGENT (The Guardrail) ---
+# --- 3. THE POLICY AGENT (The Guardrail) ---
 def _check_match(rule_val: str | int, request_val: str | int) -> bool:
     if rule_val is None or rule_val == '*':
         return True
@@ -84,7 +89,7 @@ def check_policy_and_gate(
         return {"status": "approved", "approver": "policy_engine"}
 
 policy_agent = LlmAgent(
-    model=Gemini(model="gemini-2.5-flash"),
+    model=Gemini(model="gemini-2.0-flash"), # <--- UPDATED MODEL
     name="PolicyAgent",
     instruction="""
     You are the Policy Guardrail.
@@ -95,14 +100,14 @@ policy_agent = LlmAgent(
     tools=[check_policy_and_gate]
 )
 
-# --- 3. THE FIREWALL AGENT (The Actuator) ---
+# --- 4. THE FIREWALL AGENT (The Actuator) ---
 def apply_firewall_rule(source: str, dest: str, port: int) -> str:
     """Applies the actual firewall rule to the network infrastructure."""
     logging.info(f"[FirewallTool] APPLYING RULE: {source} -> {dest}:{port}")
     return f"SUCCESS: Rule created for {source} to {dest} on port {port}."
 
 firewall_agent = LlmAgent(
-    model=Gemini(model="gemini-2.5-flash"),
+    model=Gemini(model="gemini-2.0-flash"), # <--- UPDATED MODEL
     name="FirewallAgent",
     instruction="""
     You are the Firewall Operator. 
@@ -113,24 +118,26 @@ firewall_agent = LlmAgent(
     tools=[apply_firewall_rule]
 )
 
-# --- 4. THE VPC ACCESS BROKER (The Boss) ---
+
+
+# --- 1. THE VPC ACCESS BROKER (The Orchestrator) ---
 vpc_broker_agent = LlmAgent(
-    model=Gemini(model="gemini-2.5-flash"),
+    model=Gemini(model="gemini-2.0-flash"), # <--- UPDATED MODEL
     name="VPCAccessBrokerAgent",
     instruction="""
     You are the VPC Access Broker. You act as an intelligent interface between developers and infrastructure.
 
     To fulfill a request, you MUST strictly follow this sequence. Do not skip steps.
 
-    **STEP 1: RESOLVE TAGS (MANDATORY)**
+    **STEP 1: RESOLVE TAGS**
     You need two tags: SOURCE and DESTINATION.
-    - Call 'GcpQueryAgent' to get the tag for the SOURCE name.
-    - Call 'GcpQueryAgent' to get the tag for the DESTINATION name.
-    - CRITICAL: Do NOT guess tags. If you don't know a tag, ask 'GcpQueryAgent'. Even for 'public-internet', you MUST ask the agent.
+    - Call 'GcpQueryAgent' to get the tag for the source name.
+    - Call 'GcpQueryAgent' to get the tag for the destination name.
+    - IF 'GcpQueryAgent' returns "UNKNOWN", STOP and tell the user the service name is invalid.
 
     **STEP 2: CHECK POLICY**
-    - Once you have the Source Tag (e.g. 'app:checkout'), Destination Tag (e.g. 'db:billing'), and Port, call 'PolicyAgent'.
-    - Pass these exact values.
+    - Once you have the Source Tag, Destination Tag, and Port, call 'PolicyAgent'.
+    - Pass these three exact values.
 
     **STEP 3: EXECUTE (Conditional)**
     - IF 'PolicyAgent' returns "approved": Call 'FirewallAgent' to apply the rule.
@@ -153,5 +160,6 @@ vpc_broker_agent = LlmAgent(
 vpc_broker_app = App(
     name="vpc_broker_app",
     root_agent=vpc_broker_agent,
-    resumability_config=ResumabilityConfig(is_resumable=True)
+    resumability_config=ResumabilityConfig(is_resumable=True),
+    plugins=[LoggingPlugin()]
 )

@@ -42,11 +42,19 @@ sequenceDiagram
 sequenceDiagram
     participant User
     participant Broker as VPCAccessBroker
+    participant Query as GcpQueryAgent
     participant Policy as PolicyAgent
     participant Human as Security Engineer
 
     User->>Broker: "Open public access to admin-db"
+
+    Note over Broker: Step 1: Resolve Tags
+    Broker->>Query: lookup("public-internet")
+    Query-->>Broker: "app:public-ingress"
+    Broker->>Query: lookup("admin-db")
+    Query-->>Broker: "db:admin"
     
+    Note over Broker: Step 2: Check Policy
     Broker->>Policy: check("app:public-ingress", "db:admin", 22)
     
     Note over Policy: 🚨 HIGH RISK DETECTED!
@@ -59,6 +67,7 @@ sequenceDiagram
     Note right of Policy: System Resumes
     Policy-->>Broker: "Approved (Human Override)"
     
+    Note over Broker: Step 3: Execute
     Broker->>Firewall: apply_rule(...)
     Broker->>User: "Success: Rule Created (after review)."
 ```
@@ -127,14 +136,14 @@ def lookup_resource_tag(friendly_name: str) -> str:
 #### The Agent Definition (`gcp_query_agent`)
 ```python
 gcp_query_agent = LlmAgent(
-    model=Gemini(model="gemini-2.5-flash"),
+    model=Gemini(model="gemini-2.0-flash"), # <--- Updated Model
     name="GcpQueryAgent",
     instruction="You are the Cloud Infrastructure Map...",
     tools=[lookup_resource_tag]
 )
 ```
 **Analogy**: Hiring the employee.
-- **Model**: We give it a brain (`gemini-2.5-flash`).
+- **Model**: We give it a brain (`gemini-2.0-flash`).
 - **Instruction**: We give it a job description ("You are the map...").
 - **Tools**: We give it the tool we just built (`lookup_resource_tag`).
 
@@ -195,28 +204,35 @@ vpc_broker_agent = LlmAgent(
 - Instead, its tools are **the other agents** (`AgentTool(...)`).
 - Its "Instruction" is the workflow procedure: "First ask the Eyes, then ask the Guard, then tell the Worker."
 
-### 7. The App (Lines 153-158)
+### 7. The App (Lines 156-161)
 ```python
 vpc_broker_app = App(
     name="vpc_broker_app",
     root_agent=vpc_broker_agent,
-    ...
+    resumability_config=ResumabilityConfig(is_resumable=True),
+    plugins=[LoggingPlugin()]
 )
 ```
 **Analogy**: Opening the office.
 - We wrap the "Boss" agent into an "App" so we can run it.
+- We added the `LoggingPlugin`. This is like a security camera. It automatically records every time the agent calls a tool and what the result was. This is crucial for debugging.
 
-### 8. The Delays (run.py)
-You might notice the code waits for 10 or 30 seconds sometimes.
+### 8. The Runner (`run.py`)
+The `run.py` script handles the execution loop.
 
+#### The `rate_limited_run` Function
 ```python
-async def rate_limited_run(...):
-    ...
-    print("   [Rate Limiter] Waiting 10s...")
-    await asyncio.sleep(10)
+async def rate_limited_run(runner, **kwargs):
+    print("   ⏳ [System] Processing...", end="", flush=True)
+    async for event in runner.run_async(**kwargs):
+        yield event
+        await asyncio.sleep(5) # Rate Limiting
 ```
+- **Rate Limiting**: It pauses for 5 seconds between events to ensure we don't hit the Gemini API rate limits (Free Tier).
+- **Narration**: We removed the custom narration logic because the `LoggingPlugin` now handles detailed logs.
 
-**Analogy**: The Traffic Light.
-- **Why?** We are using a free version of the "Brain" (Gemini API).
-- **The Limit**: It only allows a few questions per minute.
-- **The Solution**: If we ask too fast, it will crash. So, we force the program to "stop at a red light" for 10 seconds after every step. This ensures we never drive too fast and get a ticket (error).
+#### The Pause Logic
+The script actively looks for the `adk_request_confirmation` function call.
+- If found, it prints `⏸️ SYSTEM ALERT`.
+- It then simulates a "Security Engineer" approving the request by sending a `confirmed: True` response back to the agent.
+

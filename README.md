@@ -40,6 +40,10 @@ The system utilizes the **Google Agent Development Kit (ADK)** and a multi-agent
 * **Role:** The infrastructure automation.
 * **Tool:** `apply_firewall_rule`
 * **Logic:** Executes the actual `gcloud` commands (simulated for this demo) to apply the rule. This agent is *never* called unless the `PolicyAgent` has returned an `approved` status.
+### 5. Observability 🔍
+The system uses the **`LoggingPlugin`** to provide detailed visibility into the agent's decision-making process.
+* **Role:** Automatically logs every tool call, argument, and return value.
+* **Benefit:** Allows developers to trace exactly *why* an agent made a decision without cluttering the code with print statements.
 
 ## 🔄 Workflow Diagram
 
@@ -131,10 +135,31 @@ python run.py
 *Note: If you are on Windows, use `.venv\Scripts\activate` instead.*
 
 ### 5. Expected Output
-The script (`run.py`) runs two automated tests:
+The script (`run.py`) runs two automated tests. You will see detailed logs from the `LoggingPlugin` showing the agent's thought process.
 
-1.  **Happy Path**: A safe request ("Connect checkout to billing") that gets auto-approved.
-2.  **High-Risk Path**: A dangerous request ("Open public port") that triggers a **PAUSE**.
-    - You will see: `⏸️ SYSTEM PAUSED: High Risk Detected.`
-    - The script simulates a human approving the request after 5 seconds.
-    - The system resumes and completes the task.
+1.  **Happy Path**:
+    ```text
+    🎬  DEMO SCENARIO: HAPPY PATH (Internal Service Connection)
+    
+    👤 USER: 'I need to connect my checkout-service...'
+    
+    INFO:google.adk.plugins.logging_plugin: [Agent: VPCAccessBrokerAgent] Calling Tool: lookup_resource_tag with args: {'friendly_name': 'checkout-service'}
+    INFO:google.adk.plugins.logging_plugin: [Agent: VPCAccessBrokerAgent] Tool Output: app:checkout
+    ...
+    🤖 VPCAccessBroker > Success: Firewall rule applied...
+    ```
+
+2.  **High-Risk Path**:
+    ```text
+    🎬  DEMO SCENARIO: HIGH-RISK PATH (Public Ingress)
+    ...
+    ⏸️  SYSTEM ALERT: High Risk Operation Detected via Policy Agent
+       Locking Workflow. Reason: Public to DB is forbidden.
+    
+    👮 SECURITY ENGINEER: Reviewing request...
+       Action: APPROVED [✔]
+    
+    ▶️  RESUMING WORKFLOW...
+    ...
+    🤖 VPCAccessBroker > Rule applied.
+    ```
